@@ -11,6 +11,9 @@ import logging
 import functools
 from logging import debug
 import calendar
+from discord.components import Button, ButtonStyle
+import sqlite3 as sq
+
 logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
 dates_check = {}
 months_check = {}
@@ -58,6 +61,10 @@ token = os.environ["token"]
 
 channel = "general"
 
+connection = sq.connect("guilds.db")
+debug(connection.total_changes)
+cursor = connection.cursor()
+cursor.execute("CREATE TABLE guilds (name TEXT, species TEXT, tank_number INTEGER)")
 
 def redefine_function():
   global webhook
@@ -300,9 +307,42 @@ async def setup(ctx, channel : discord.TextChannel):
   with open("role_ids.json", "w") as file:
     json.dump(role_ids, file)
   await ctx.respond(f"Channel ID has been set and <@&{roleid}> has been created")
+
+@bot.command()
+async def help(ctx):
+  embed = discord.Embed(title='Birthday Bot Commands', description=None)
+  guild = str(ctx.guild.id)
+  with open("role_ids.json", "r") as file:
+    role_ids = json.load(file)
+  roleid = role_ids[guild]
+  try:
+    embed.add_field(name='Assign', value=f'Assign <@&{int(roleid)}>')
+    embed.add_field(name='birthday set', description='Set/change your birthday')
+    embed.add_field(name='help', value='Receive this embed')
+    embed.add_field(name='Remove', value=f'Remove <@&{int(roleid)}>')
+  except Exception as e:
+    debug(f"Error{e}")
+    debug("")
+    embed.add_field(name='Assign', value=f'''Assign ```Role not setup```''')
+    embed.add_field(name='birthday set', value='Set/change your birthday')
+    embed.add_field(name='help', value='Receive this embed')
+    embed.add_field(name='Remove', value=f'''Remove ```Role not setup```''')
+  message_triggers = discord.Embed(name=None, description=None)
+  message_triggers.add_field(name='Message Triggers', value=None)
+  if ctx.author.guild_permissions.administrator:
+    embed.add_field(name='setup', value='Set up the birthday bot in your server')
+  message_triggers.add_field(name='Birthday?', value='Run the webhook')
+  
+
 birthday = bot.create_group("birthday")
-@birthday.command(name='set')
-async def set_birthday(ctx, month, date):
+@birthday.command(name='set', description='Set your birthday',
+                 options=[
+                   discord.Option(name='month',
+                          description='Your birthday month',
+                          type=str,
+                          choices=['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']),
+                  discord.Option(name='date', description='The date of your birthday', type=str)])
+async def set_birthday(ctx, month:str, date):
   months = list(calendar.month_name)
   if str(month) in months:
     month_index = months.index(str(month))
@@ -323,6 +363,7 @@ async def set_birthday(ctx, month, date):
     birthdaysAll = json.load(file)
   user_id = ctx.author.id
   found = False
+  guild_id = str(ctx.guild.id)
   birthdays = birthdaysAll[str(guild_id)]
   for key in birthdays:
     if key == str(user_id):
@@ -445,10 +486,9 @@ async def on_message(message):
   elif message.author == bot.user:
     return
   
-  if message.content.lower() == 'setup start':
-    await message.channel.send("Please send the following message: '.setup <channel you would like to use i.e. #birthdays>' and the channel will be set. Additionally, a 'birthday cake' role will be created. Please send 'birthday help' for more info on how the bot works. Yes, you do need the . before setup")
+
   
-  elif message.content.lower().startswith('birthday?'):
+  if message.content.lower().startswith('birthday?'):
     guild_ids = []
     guild_id = message.guild.id
     with open('guild_channels.json', 'r') as file:
@@ -508,48 +548,6 @@ async def on_message(message):
   elif message.content.lower() == 'test redefine':
     await message.channel.send("Testing Redefinition of ```webhook()```")
     redefine_function()
-
-  elif message.content.lower() == 'triggers' or message.content.lower(
-  ) == 'birthday help':
-    with open("role_ids.json", "r") as file:
-      role_ids = json.load(file)
-    try:
-      roleid = role_ids[str(message.guild.id)]
-      embed = discord.Embed(title="Bot Message Triggers",
-        description=f"""
-      ```Remove```  Remove <@&{int(roleid)}>
-      ```Role```  Assign <@&{int(roleid)}>
-      ```Triggers```  Receive this embed
-      ```Birthday help```  Receive this embed
-      ```Test redefine```  Test a redefinition of the **webhook** function
-      ```Birthday?```  Run the webhook (Once per day)
-      ```Birthday: MM/DD```  Set your birthday
-      ```Change birthday: MM/DD```  Change Your Birthday""")
-      embed.set_footer(
-          text=
-          "Note that triggers are not case sensitive. Additionally, support can be sent to the bot's direct messages"
-      )
-    except Exception as e:
-      debug(f"Error: {e}")
-      debug("")
-      embed = discord.Embed(title="Bot Message Triggers",
-        description=f"""
-      ```Remove```  Remove `role not setup`
-      ```Role```  Assign `role not setup`
-      ```Triggers```  Receive this embed
-      ```Birthday help```  Receive this embed
-      ```Test redefine```  Test a redefinition of the **webhook** function
-      ```Birthday?```  Run the webhook (Once per day)
-      ```Birthday: MM/DD```  Set your birthday
-      ```Change birthday: MM/DD```  Change Your Birthday""")
-      embed.set_footer(
-          text=
-          """Note that triggers are not case sensitive. Additionally, support can be sent to the bot's direct messages
-          `Bot has not been fully setup in this server`"""
-      )
-    
-    await message.channel.send(embed=embed)
-
   
 
   elif message.content.lower().startswith("change birthday: "):
@@ -627,25 +625,9 @@ async def on_member_join(member):
   embed = discord.Embed(
       title=None,
       description=
-      """We need to know your birthday so that we can add more features to the bot. Please use the following format to provide us your birthday:
-      Birthday: MM/DD
-
-      Example:
-      Birthday: 06/09
-    
-      ```Months:
-      January: 01
-      February: 02
-      March: 03
-      April: 04
-      May: 05
-      June: 06
-      July: 07
-      August: 08
-      September: 09
-      October: 10
-      November: 11
-      December: 12```
+      """
+      If you would like to, you have the option of putting your birthday in the bot. On your birthday, if the bot is run, you will receive a happy birthday message.
+      Run /birthday set
 
       You should receive a message in response confirming that your birthday was assigned.
       """)
